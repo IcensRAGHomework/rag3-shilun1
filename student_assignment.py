@@ -1,9 +1,7 @@
-import datetime
-import chromadb
-import traceback
-import pandas as pd
 import time
 
+import chromadb
+import pandas as pd
 from chromadb.utils import embedding_functions
 
 from model_configurations import get_model_configuration
@@ -54,13 +52,7 @@ def get_collection():
     return collection
 
 
-def generate_hw01():
-    collection = get_collection()
-    return collection
-
-
-def generate_hw02(question, city=None, store_type=None, start_date=None, end_date=None):
-    collection = get_collection()
+def _build_filters(city=None, store_type=None, start_date=None, end_date=None):
     filters = []
     if city:
         filters.append({"city": {"$in": city}})
@@ -70,15 +62,37 @@ def generate_hw02(question, city=None, store_type=None, start_date=None, end_dat
         filters.append({"date": {"$gte": start_date.timestamp()}})
     if end_date:
         filters.append({"date": {"$lte": end_date.timestamp()}})
-    where = None if not filters else filters[0] if len(filters) == 1 else {"$and": filters}
+    return None if not filters else filters[0] if len(filters) == 1 else {"$and": filters}
+
+
+def run_query(collection, question, where, new_store_name=False):
     query_results = collection.query(query_texts=[question], n_results=10, where=where)
-    names, distances = query_results["metadatas"][0], query_results["distances"][0]
-    sorted_names = [x['name'] for x, d in sorted(zip(names, distances), key=lambda x: x[1], reverse=False) if d < 0.2]
-    return sorted_names
+    names, distances = query_results.get("metadatas", [[]])[0], query_results.get("distances", [[]])[0]
+    if new_store_name:
+        return [x.get("new_store_name", x.get("name")) for x, d in sorted(zip(names, distances), key=lambda x: x[1]) if
+                d < 0.2]
+    else:
+        return [x.get("name") for x, d in sorted(zip(names, distances), key=lambda x: x[1]) if d < 0.2]
 
 
-def generate_hw03(question, store_name, new_store_name, city, store_type):
-    pass
+def generate_hw01():
+    collection = get_collection()
+    return collection
+
+
+def generate_hw02(question, city=None, store_type=None, start_date=None, end_date=None):
+    collection = get_collection()
+    where = _build_filters(city, store_type, start_date, end_date)
+    return run_query(collection, question, where)
+
+
+def generate_hw03(question, store_name, new_store_name, city=None, store_type=None):
+    collection = get_collection()
+    selected = collection.get(where={"name": store_name})
+    metadatas = [{**item, "new_store_name": new_store_name} for item in selected.get("metadatas", [])]
+    collection.upsert(ids=selected.get("ids", []), metadatas=metadatas, documents=selected.get("documents", []))
+    where = _build_filters(city, store_type)
+    return run_query(collection, question, where, True)
 
 
 def demo(question):
